@@ -1,4 +1,4 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@
 #include <QtCore/QSet>
 #include <cassert>
 
-typedef QMap<QString, WbNode *> Dictionary;
+typedef QMultiMap<QString, WbNode *> Dictionary;
 
 WbDictionary *WbDictionary::cInstance = NULL;
 
@@ -75,7 +75,7 @@ bool WbDictionary::updateDef(WbBaseNode *&node, WbSFNode *sfNode, WbMFNode *mfNo
   // Charger and LED USE nodes in the first child have to link to DEF nodes in the first child
 
   if (!defName.isEmpty() && mNestedDictionaries.size() == 1)
-    mSceneDictionary.append(QPair<WbNode *, QString>(node, defName));
+    mSceneDictionary.append(std::pair<WbNode *, QString>(node, defName));
 
   QString warning;
   const bool isAValidUseableNode =
@@ -407,12 +407,11 @@ void WbDictionary::updateProtosDef(WbBaseNode *&node, WbSFNode *sfNode, WbMFNode
 void WbDictionary::makeDefNodeAndUpdateDictionary(WbBaseNode *node, bool updateSceneDictionary) {
   const QString &useName = node->useName();
   node->makeDefNode();
-  node->updateContextDependentObjects();
   assert(mNestedDictionaries.size() >= 2);
   mNestedDictionaries.removeLast();  // remove USE node local dictionary
   mNestedDictionaries.last().insert(useName, node);
   if (updateSceneDictionary && mNestedDictionaries.size() == 1)
-    mSceneDictionary.append(QPair<WbNode *, QString>(node, node->defName()));
+    mSceneDictionary.append(std::pair<WbNode *, QString>(node, node->defName()));
 }
 
 bool WbDictionary::checkBoundingObjectConstraints(const WbBaseNode *defNode, QString &errorMessage) {
@@ -512,7 +511,8 @@ bool WbDictionary::isSuitable(const WbNode *defNode, const QString &type) const 
   const WbBaseNode *defBaseNode = dynamic_cast<const WbBaseNode *>(defNode);
 
   // recheck validity of DEF node and subnodes if the USE is used in a different context (boundingObject or not)
-  if ((mTargetField->name() == "boundingObject" || targetNodeUse != defBaseNode->nodeUse()) &&
+  if (((mTargetField->name() == "boundingObject" && defBaseNode->nodeUse() & WbNode::STRUCTURE_USE) ||
+       (targetNodeUse != defBaseNode->nodeUse() && mTargetField->name() != "boundingObject")) &&
       !checkBoundingObjectConstraints(defBaseNode, errorMessage))
     return false;
 
@@ -593,7 +593,7 @@ void WbDictionary::updateForInsertion(const WbNode *const node, bool suitableOnl
 WbNode *WbDictionary::getNodeFromDEF(const QString &defName) const {
   const int size = mSceneDictionary.size();
   for (int i = 0; i < size; ++i) {
-    const QPair<WbNode *, QString> entry = mSceneDictionary.at(i);
+    const std::pair<WbNode *, QString> entry = mSceneDictionary.at(i);
     if (entry.second == defName)
       return entry.first;
   }
@@ -607,7 +607,7 @@ void WbDictionary::updateNodeDefName(WbNode *node, bool fromUseToDef) {
 
   const int size = mSceneDictionary.size();
   for (int i = 0; i < size; ++i) {
-    QPair<WbNode *, QString> &entry = mSceneDictionary[i];
+    std::pair<WbNode *, QString> &entry = mSceneDictionary[i];
     if (entry.first == node) {
       if (node->defName().isEmpty())
         mSceneDictionary.removeAt(i);
@@ -626,7 +626,7 @@ void WbDictionary::removeNodeFromDictionary(WbNode *node) {
     // dictionary will be completely recomputed
     return;
 
-  QMutableListIterator<QPair<WbNode *, QString>> it(mSceneDictionary);
+  QMutableListIterator<std::pair<WbNode *, QString>> it(mSceneDictionary);
   while (it.hasNext()) {
     if (it.next().first == node) {
       it.remove();

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 1996-2021 Cyberbotics Ltd.
+# Copyright 1996-2023 Cyberbotics Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import fnmatch
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 from io import open
 
@@ -48,15 +49,17 @@ DESCRIPTION_STATE = 0
 FIELDS_STATE = 1
 BODY_STATE = 2
 
+TAG = 'R2023a'
+
 fileList = []
 upperCategories = {'projects': ['appearances']}
 
 # look for all the PROTO files in the 'projects/objects' directory
-for rootPath, dirNames, fileNames in os.walk(os.environ['WEBOTS_HOME'] + os.sep + 'projects' + os.sep + 'objects'):
+for rootPath, dirNames, fileNames in os.walk(os.path.join(os.environ['WEBOTS_HOME'], 'projects', 'objects')):
     for fileName in fnmatch.filter(fileNames, '*.proto'):
         fileList.append(os.path.join(rootPath, fileName))
 # look for all the PROTO files in the 'projects/appearances' directory
-for rootPath, dirNames, fileNames in os.walk(os.environ['WEBOTS_HOME'] + os.sep + 'projects' + os.sep + 'appearances'):
+for rootPath, dirNames, fileNames in os.walk(os.path.join(os.environ['WEBOTS_HOME'], 'projects', 'appearances')):
     for fileName in fnmatch.filter(fileNames, '*.proto'):
         fileList.append(os.path.join(rootPath, fileName))
 fileList = sorted(fileList)
@@ -125,9 +128,10 @@ for proto in prioritaryProtoList + fileList:
                     newLine = newLine.replace(url, '[%s](%s)' % (url, url))
                 description += newLine + '\n'
         if skipProto:
-            imagePath = 'images/objects/%s/%s/model.png' % (category, protoName)
             if upperCategory == 'projects':
-                imagePath = 'images/%s/%s.png' % (category, protoName)
+                imagePath = os.path.join('images', category, protoName + '.png')
+            else:
+                imagePath = os.path.join('images', 'objects', category, protoName, 'model.png')
             if os.path.exists(imagePath):
                 os.remove(imagePath)
             thumbnailPath = imagePath.replace('.png', '.thumbnail.png')
@@ -183,23 +187,24 @@ for proto in prioritaryProtoList + fileList:
                 fieldString = re.sub(r'\s*(#.*)', '', match.group(), 0, re.MULTILINE)
                 # remove intial '*field' string
                 fieldString = re.sub(r'^\s*.*field\s', '  ', fieldString, 0, re.MULTILINE)
+                # update urls
+                fieldString = fieldString.replace(
+                    'webots://', 'https://raw.githubusercontent.com/cyberbotics/webots/' + TAG + '/')
                 # remove unwanted spaces between field type and field name (if needed)
                 if spacesToRemove > 0:
                     fieldString = fieldString.replace(fieldType + ' ' * spacesToRemove, fieldType)
                 fields += fieldString + '\n'
 
-    baseType = ''
-    # use the cache file to get the baseType
-    cacheFile = proto.replace(os.path.basename(proto), '.' + os.path.basename(proto)).replace('.proto', '.cache')
-    if os.path.isfile(cacheFile):
-        with open(cacheFile, 'r', encoding='utf-8') as file:
-            for line in file.readlines():
-                match = re.match(r'baseType:\s*([a-zA-Z]*)', line)
-                if match:
-                    baseType = match.group(1)
-                    break
-    else:
-        sys.stderr.write('Could not find cache file: "%s"\n' % cacheFile)
+    baseType = None
+    # use the proto-list.xml file to get the baseType
+    root = ET.parse(os.path.join(os.environ['WEBOTS_HOME'], 'resources', 'proto-list.xml')).getroot()
+
+    for child in root:
+        for item in list(child):
+            if item.tag == 'name' and item.text == protoName:
+                baseType = child.find('base-type').text
+    if baseType is None:
+        sys.stderr.write(f'Could not find proto \"{protoName}\"\n')
 
     # add documentation for this PROTO file
     mode = 'a'
@@ -225,9 +230,10 @@ for proto in prioritaryProtoList + fileList:
 
         file.write(description + '\n')
 
-        imagePath = 'images/objects/%s/%s/model.png' % (category, protoName)
         if upperCategory == 'projects':  # appearances
-            imagePath = 'images/%s/%s.png' % (category, protoName)
+            imagePath = os.path.join('images', category, protoName + '.png')
+        else:
+            imagePath = os.path.join('images', 'objects', category, protoName, 'model.png')
         thumbnailPath = imagePath.replace('.png', '.thumbnail.png')
         if os.path.isfile(thumbnailPath):
             imagePath = thumbnailPath
@@ -238,7 +244,7 @@ for proto in prioritaryProtoList + fileList:
         else:
             # maybe multiple images
             if os.path.exists(os.path.dirname(imagePath)):
-                availableImages = [os.path.dirname(imagePath) + '/' + f for f in os.listdir(os.path.dirname(imagePath))]
+                availableImages = [os.path.join(os.path.dirname(imagePath), f) for f in os.listdir(os.path.dirname(imagePath))]
                 regex = imagePath.replace('.png', '_..png')
                 files = []
                 for image in availableImages:
@@ -274,7 +280,7 @@ for proto in prioritaryProtoList + fileList:
         file.write(fields)
         file.write(u'}\n')
         file.write(u'```\n\n')
-        location = proto.replace(os.environ['WEBOTS_HOME'], '').replace(os.sep, '/')
+        location = os.path.normpath(proto.replace(os.environ['WEBOTS_HOME'], ''))
         file.write(u'> **File location**: "[WEBOTS\\_HOME%s]({{ url.github_tree }}%s)"\n\n' %
                    (location.replace('_', '\\_'), location))
         if license:

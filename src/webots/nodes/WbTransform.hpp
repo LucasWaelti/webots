@@ -1,4 +1,4 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,6 +46,9 @@ public:
   void setMatrixNeedUpdate() override;
   void connectGeometryField(bool dynamic);
   void reset(const QString &id) override;
+  QList<const WbBaseNode *> findClosestDescendantNodesWithDedicatedWrenNode() const override {
+    return QList<const WbBaseNode *>() << this;
+  }
 
   // accessors to stored fields
   const WbVector3 translationFromFile(const QString &id) const { return mSavedTranslations[id]; }
@@ -88,7 +91,7 @@ public:
   WbMatrix3 rotationMatrixFrom(const WbNode *fromNode) const;
 
   // export
-  void exportBoundingObjectToX3D(WbVrmlWriter &writer) const override;
+  void exportBoundingObjectToX3D(WbWriter &writer) const override;
   QStringList fieldsToSynchronizeWithX3D() const override;
 
 public slots:

@@ -1,4 +1,4 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,14 +59,15 @@ void WbGeometry::init() {
   mWrenScaleTransform = NULL;
   mCollisionTime = -std::numeric_limits<float>::infinity();
   mPreviousCollisionTime = -std::numeric_limits<float>::infinity();
-  mOdeGeom = NULL;
   mIs90DegreesRotated = false;
+  mOdeGeom = NULL;
   mOdeMass = NULL;
   mResizeManipulator = NULL;
   mResizeManipulatorInitialized = false;
   mResizeConstraint = WbWrenAbstractResizeManipulator::NO_CONSTRAINT;
   mBoundingSphere = NULL;
   mPickable = false;
+  mIsTransparent = false;
 }
 
 WbGeometry::WbGeometry(const QString &modelName, WbTokenizer *tokenizer) : WbBaseNode(modelName, tokenizer) {
@@ -84,7 +85,7 @@ WbGeometry::WbGeometry(const WbNode &other) : WbBaseNode(other) {
 WbGeometry::~WbGeometry() {
   delete mResizeManipulator;
   if (mOdeGeom)
-    destroyOdeObjects();  // for WbGeometries lying in a boundinObject
+    destroyOdeObjects();  // for WbGeometries lying in a boundingObject
   delete mOdeMass;
   delete mBoundingSphere;
 
@@ -158,9 +159,9 @@ dGeomID WbGeometry::createOdeGeom(dSpaceID space) {
 
 void WbGeometry::checkFluidBoundingObjectOrientation() {
   const WbMatrix3 &m = upperTransform()->rotationMatrix();
-  const WbVector3 &yAxis = m.column(1);
+  const WbVector3 &zAxis = m.column(2);
   const WbVector3 &g = WbWorld::instance()->worldInfo()->gravityVector();
-  const double alpha = yAxis.angle(-g);
+  const double alpha = zAxis.angle(-g);
 
   static const double ZERO_THRESHOLD = 1e-3;
 
@@ -174,19 +175,6 @@ void WbGeometry::checkFluidBoundingObjectOrientation() {
 /////////////////////////
 // Create WREN Objects //
 /////////////////////////
-
-void WbGeometry::checkForResizeManipulator() {
-  if (!mResizeManipulator && hasResizeManipulator()) {
-    createResizeManipulator();
-    if (mResizeManipulator)
-      mResizeManipulator->attachTo(wrenNode());
-  }
-}
-
-void WbGeometry::updateContextDependentObjects() {
-  checkForResizeManipulator();
-  WbBaseNode::updateContextDependentObjects();
-}
 
 void WbGeometry::setPickable(bool pickable) {
   if (!mWrenRenderable || isInBoundingObject())
@@ -222,6 +210,9 @@ void WbGeometry::applyVisibilityFlagToWren(bool selected) {
       wr_node_set_visible(WR_NODE(mWrenScaleTransform), true);
     } else if (wr_node_get_parent(WR_NODE(mWrenScaleTransform)))
       wr_node_set_visible(WR_NODE(mWrenScaleTransform), false);
+  } else if (mIsTransparent) {
+    wr_renderable_set_visibility_flags(mWrenRenderable, WbWrenRenderingContext::VF_INVISIBLE_FROM_CAMERA);
+    wr_node_set_visible(WR_NODE(mWrenScaleTransform), false);
   } else if (WbNodeUtilities::isDescendantOfBillboard(this)) {
     wr_renderable_set_visibility_flags(mWrenRenderable, WbWrenRenderingContext::VF_INVISIBLE_FROM_CAMERA);
     wr_node_set_visible(WR_NODE(mWrenScaleTransform), true);
@@ -245,7 +236,8 @@ void WbGeometry::applyToOdeMass() {
   assert(odeGeomData);
   if (mOdeMass->mass > 0.0) {
     WbSolid *const solid = odeGeomData->solid();
-    solid->correctOdeMass(mOdeMass, transformedGeometry());
+    if (solid && solid->physics())
+      solid->correctOdeMass(mOdeMass, transformedGeometry());
   }
 }
 
@@ -391,6 +383,13 @@ void WbGeometry::setWrenMaterial(WrMaterial *material, bool castShadows) {
   }
 }
 
+void WbGeometry::setTransparent(bool isTransparent) {
+  if (mIsTransparent != isTransparent) {
+    mIsTransparent = isTransparent;
+    applyVisibilityFlagToWren(isSelected());
+  }
+}
+
 void WbGeometry::destroyWrenObjects() {
   if (areWrenObjectsInitialized()) {
     WbWrenOpenGlContext::makeWrenCurrent();
@@ -417,13 +416,21 @@ void WbGeometry::updateResizeHandlesSize() {
 void WbGeometry::createResizeManipulatorIfNeeded() {
   if (!mResizeManipulatorInitialized) {
     mResizeManipulatorInitialized = true;
-    checkForResizeManipulator();
+    if (!mResizeManipulator && hasResizeManipulator()) {
+      createResizeManipulator();
+      if (mResizeManipulator)
+        mResizeManipulator->attachTo(wrenNode());
+    }
   }
 }
 
 WbWrenAbstractResizeManipulator *WbGeometry::resizeManipulator() {
   createResizeManipulatorIfNeeded();
   return mResizeManipulator;
+}
+
+bool WbGeometry::isResizeManipulatorAttached() const {
+  return mResizeManipulator ? mResizeManipulator->isAttached() : false;
 }
 
 void WbGeometry::attachResizeManipulator() {
@@ -567,7 +574,7 @@ int WbGeometry::triangleCount() const {
     return 0;
 }
 
-bool WbGeometry::exportNodeHeader(WbVrmlWriter &writer) const {
+bool WbGeometry::exportNodeHeader(WbWriter &writer) const {
   if (writer.isUrdf())
     return true;
   return WbBaseNode::exportNodeHeader(writer);
@@ -584,9 +591,9 @@ WbMatrix4 WbGeometry::matrix() const {
   if (!ut->isInBoundingObject())
     return ut->matrix();
   else {
-    const WbMatrix4 &matrix = ut->vrmlMatrix();
+    const WbMatrix4 &matrix4 = ut->vrmlMatrix();
     ut = ut->upperTransform();
-    return ut->matrix() * matrix;
+    return ut->matrix() * matrix4;
   }
 }
 
@@ -600,7 +607,7 @@ int WbGeometry::constraintType() const {
   if (geometryType == WB_NODE_SPHERE || geometryType == WB_NODE_CAPSULE)
     constraint = WbWrenAbstractResizeManipulator::UNIFORM;
   else if (geometryType == WB_NODE_CYLINDER)
-    constraint = WbWrenAbstractResizeManipulator::X_EQUAL_Z;
+    constraint = WbWrenAbstractResizeManipulator::X_EQUAL_Y;
 
   return constraint;
 }
@@ -609,42 +616,11 @@ int WbGeometry::constraintType() const {
 // Export //
 ////////////
 
-void WbGeometry::exportBoundingObjectToX3D(WbVrmlWriter &writer) const {
+void WbGeometry::exportBoundingObjectToX3D(WbWriter &writer) const {
   assert(writer.isX3d());
   assert(isInBoundingObject());
-  assert(mWrenMesh);
+  if (!mWrenMesh)
+    return;
 
-  const int vertexCount = wr_static_mesh_get_vertex_count(mWrenMesh);
-  const int indexCount = wr_static_mesh_get_index_count(mWrenMesh);
-  float vertices[3 * vertexCount];
-  unsigned int indices[indexCount];
-  wr_static_mesh_read_data(mWrenMesh, vertices, NULL, NULL, indices);
-
-  writer << "<Appearance sortType='transparent'><Material emissiveColor='1 1 1'></Material></Appearance>";
-  writer << "<IndexedLineSet coordIndex='";
-
-  for (int i = 0; i < indexCount / 2; ++i)
-    writer << indices[2 * i] << " " << indices[2 * i + 1] << " -1 ";
-  writer << "'>";
-
-  writer << "<Coordinate point='";
-  const float *floatMatrix = wr_transform_get_matrix(mWrenScaleTransform);
-  double doubleMatrix[16];
-  for (int i = 0; i < 16; ++i)
-    doubleMatrix[i] = static_cast<double>(floatMatrix[i]);
-
-  // Extract WREN scaling factors
-  WbMatrix4 meshMatrix;
-  meshMatrix.fromOpenGlMatrix(doubleMatrix);
-  WbVector3 scale = meshMatrix.scale();
-  scale /= absoluteScale();
-
-  for (int i = 0; i < vertexCount; ++i) {
-    const int index = 3 * i;
-    WbVector3 coord = WbVector3(vertices[index], vertices[index + 1], vertices[index + 2]) * scale;
-    writer << coord.toString(WbPrecision::DOUBLE_MAX) << " ";
-  }
-  writer << "'></Coordinate>";
-
-  writer << "</IndexedLineSet>";
+  this->write(writer);
 }

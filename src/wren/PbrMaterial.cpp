@@ -1,4 +1,4 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ namespace wren {
   }
 
   size_t PbrMaterial::sortingId() const {
-    const size_t programId = static_cast<size_t>(mDefaultProgram->glName());
+    const unsigned long long programId = static_cast<unsigned long long>(mDefaultProgram->glName());
 
     size_t textureId = 0;
     if (mTextures[0].first)
@@ -212,6 +212,8 @@ namespace wren {
     mMaterialStructure->type = WR_MATERIAL_PBR;
     mMaterialStructure->data = reinterpret_cast<void *>(this);
   }
+
+  PbrMaterial::~PbrMaterial() { delete mMaterialStructure; }
 
   void PbrMaterial::init() {
     GlslLayout::PbrMaterial material;

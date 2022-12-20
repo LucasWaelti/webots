@@ -1,4 +1,4 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,6 +89,14 @@ int Robot::step(int duration) {
   return wb_robot_step(duration);
 }
 
+int Robot::stepBegin(int duration) {
+  return wb_robot_step_begin(duration);
+}
+
+int Robot::stepEnd() {
+  return wb_robot_step_end();
+}
+
 Robot::UserInputEvent Robot::waitForUserInputEvent(UserInputEvent event_type, int timeout) {
   return UserInputEvent(wb_robot_wait_for_user_input_event(WbUserInputEvent(event_type), timeout));
 }
@@ -165,10 +173,6 @@ Device *Robot::getDeviceByIndex(int index) {
 
 Device *Robot::getDevice(const std::string &name) {
   return getOrCreateDevice(wb_robot_get_device(name.c_str()));
-}
-
-int Robot::getType() const {
-  return wb_robot_get_type();
 }
 
 void Robot::batterySensorEnable(int sampling_period) {
@@ -592,7 +596,7 @@ const char *Robot::wwiReceive(int *size) {
 }
 
 string Robot::wwiReceiveText() {
-  const char *text = wb_robot_wwi_receive(NULL);
+  const char *text = wb_robot_wwi_receive_text();
   if (text)
     return string(text);
   else

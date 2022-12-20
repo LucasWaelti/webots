@@ -1,4 +1,4 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,7 +113,7 @@ signals:
   void aborted();  // triggers drag destruction in WbView3D
 
 public slots:
-  void updateRenderingAndPhysics();
+  virtual void updateRenderingAndPhysics();
 
 protected:
   void init();

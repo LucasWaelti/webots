@@ -2,7 +2,8 @@
 <html>
   <head>
     <meta charset='UTF-8'>
-    <link type="text/css" rel="stylesheet" href='../../../../include/tabs.css' />
+    <link type="text/css" rel="stylesheet" href='webots://projects/samples/robotbenchmark/include/tabs.css' />
+    <link rel="icon" type="image/png" href="https://cyberbotics.com/assets/images/webots.png">
   </head>
   <body>
     <div id='infotabs' class='wrapper webotsTabs'>
@@ -83,7 +84,7 @@
         </div>
       </div>
     </div>
-    <script src="wall_following.js"></script>
+    <script type="module" src="wall_following.js"></script>
     <script>
       let height;
       function adaptPositionOfText() {
@@ -95,9 +96,9 @@
           return;
         height = newHeight;
         let panels = document.getElementsByClassName('panel');
-        for (panel of panels) {
+        Array.from(panels).forEach((panel) => {
           panel.style.top = height + 'px';
-        };
+        });
       }
       window.addEventListener('resize', adaptPositionOfText);
       adaptPositionOfText();

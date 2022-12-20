@@ -1,4 +1,4 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,6 +53,7 @@
 #include "WbTokenizer.hpp"
 #include "WbVector4.hpp"
 #include "WbViewpoint.hpp"
+#include "WbVrmlNodeUtilities.hpp"
 #include "WbWorld.hpp"
 #include "WbWorldInfo.hpp"
 #include "WbWrenRenderingContext.hpp"
@@ -386,6 +387,7 @@ bool WbSolid::applyHiddenKinematicParameters(const HiddenKinematicParameters *hk
       if (!p)
         return false;
       const int jointIndex = i.key();
+      assert(jointIndex < mJointChildren.length());
       WbJoint *const joint = dynamic_cast<WbJoint *>(mJointChildren.at(jointIndex));
       if (!joint)
         return false;
@@ -460,6 +462,7 @@ void WbSolid::postFinalize() {
   connect(this, &WbSolid::massPropertiesChanged, this, &WbSolid::displayWarning);
   connect(mPhysics, &WbSFNode::changed, this, &WbSolid::updatePhysics);
   connect(mRadarCrossSection, &WbSFDouble::changed, this, &WbSolid::updateRadarCrossSection);
+  connect(mRecognitionColors, &WbMFColor::itemChanged, this, &WbSolid::updateRecognitionColors);
   connect(mRecognitionColors, &WbMFColor::itemRemoved, this, &WbSolid::updateRecognitionColors);
   connect(mRecognitionColors, &WbMFColor::itemInserted, this, &WbSolid::updateRecognitionColors);
 
@@ -549,7 +552,7 @@ void WbSolid::resolveNameClashIfNeeded(bool automaticallyChange, bool recursive,
         if (isTemplateRegenerator)
           parsingWarn(warningText +
                       tr(" A unique name cannot be automatically generated because 'name' is a template regenerator field."));
-        else if (!WbNodeUtilities::isVisible(findField("name")))
+        else if (!WbVrmlNodeUtilities::isVisible(findField("name")))
           parsingWarn(warningText);
         else {
           // find first available index
@@ -1291,6 +1294,8 @@ void WbSolid::updatePhysics() {
     delete mSolidMerger.data();
   }
 
+  if (mOdeMass && mPhysics->value())
+    dMassSetZero(mOdeMass);  // force recomputing the ODE mass
   setupSolidMergers();
   setBodiesAndJointsToParents();
   setJointChildrenWithReferencedEndpoint();
@@ -1312,11 +1317,25 @@ void WbSolid::updateRadarCrossSection() {
 }
 
 void WbSolid::updateRecognitionColors() {
+  WbRgb segmentationColor(0.0, 0.0, 0.0);
   if (!mRecognitionColors->isEmpty()) {
     if (!WbWorld::instance()->cameraRecognitionObjects().contains(this))
       WbWorld::instance()->addCameraRecognitionObject(this);
+    segmentationColor = mRecognitionColors->item(0);
   } else if (WbWorld::instance()->cameraRecognitionObjects().contains(this))
     WbWorld::instance()->removeCameraRecognitionObject(this);
+
+  // set segmentation color in child nodes
+  WbGroup::updateSegmentationColor(segmentationColor);
+}
+
+void WbSolid::updateSegmentationColor(const WbRgb &color) {
+  // apply segmentation color from parent node if needed
+  if (!mRecognitionColors->isEmpty())
+    // this node already defines different recognitionColors
+    return;
+
+  WbGroup::updateSegmentationColor(color);
 }
 
 void WbSolid::updateOdeMass() {
@@ -1503,7 +1522,7 @@ void WbSolid::collectSolidChildren(const WbGroup *group, bool connectSignals, QV
 
     const WbSlot *slot = dynamic_cast<WbSlot *>(n);
     if (slot) {
-      if (slot->hasEndpoint()) {
+      if (slot->hasEndPoint()) {
         WbSlot *sep = slot->slotEndPoint();
         while (sep) {
           slot = sep;
@@ -1956,13 +1975,12 @@ void WbSolid::applyPhysicsTransform() {
     dQMultiply1(qr, q.ptr(), dBodyGetQuaternion(b));
   }
 
-  if (std::isnan(qr[0]) || std::isnan(qr[1]) || std::isnan(qr[2]) || std::isnan(qr[3]) ||
-      (qr[1] == 0.0 && qr[2] == 0.0 && qr[3] == 0.0)) {
-    setTransformFromOde(result[0], result[1], result[2], 0.0, 1.0, 0.0, 0.0);
+  const double norm = sqrt(qr[1] * qr[1] + qr[2] * qr[2] + qr[3] * qr[3]);
+  if (std::isnan(qr[0]) || std::isnan(norm) || norm == 0.0) {
+    setTransformFromOde(result[0], result[1], result[2], 0.0, 0.0, 1.0, 0.0);
     return;
   }
 
-  const double norm = sqrt(qr[1] * qr[1] + qr[2] * qr[2] + qr[3] * qr[3]);
   double angle = 2.0 * atan2(norm, qr[0]);  // in the range [-2 * M_PI, 2 * M_PI]
   if (angle < -M_PI)
     angle += 2.0 * M_PI;
@@ -2291,9 +2309,10 @@ void WbSolid::resetPhysics(bool recursive) {
   resetSingleSolidPhysics();
 
   // Recurses through all first level solid descendants
-  if (recursive)
+  if (recursive) {
     foreach (WbSolid *const solid, mSolidChildren)
       solid->resetPhysics();
+  }
 }
 
 void WbSolid::resetSingleSolidPhysics() {
@@ -2457,11 +2476,12 @@ const WbPolygon &WbSolid::supportPolygon() {
   const WbVector3 &eastVector = worldInfo->eastVector();
   const WbVector3 &northVector = worldInfo->northVector();
   // Rules out 4 trivial cases
-  for (int i = 0; i < numberOfContactPoints; ++i) {
-    const WbVector3 &v = mGlobalListOfContactPoints.at(i);
-    mSupportPolygon[i].setXy(v.dot(northVector), v.dot(eastVector));
-  }
   if (numberOfContactPoints <= 3) {
+    assert(mSupportPolygon.size() >= numberOfContactPoints);
+    for (int i = 0; i < numberOfContactPoints; ++i) {
+      const WbVector3 &v = mGlobalListOfContactPoints.at(i);
+      mSupportPolygon[i].setXy(v.dot(northVector), v.dot(eastVector));
+    }
     mSupportPolygon.setActualSize(numberOfContactPoints);
     return mSupportPolygon;
   }
@@ -2512,6 +2532,9 @@ bool WbSolid::showSupportPolygonRepresentation(bool enabled) {
       mSupportPolygonRepresentation = new WbSupportPolygonRepresentation();
       mSupportPolygonNeedsUpdate = true;
     }
+    if (mSupportPolygon.size() < 4)
+      // minimum expected size to rule out trivial cases
+      mSupportPolygon.resize(4);
     connect(WbSimulationState::instance(), &WbSimulationState::physicsStepStarted, this,
             &WbSolid::refreshSupportPolygonRepresentation, Qt::UniqueConnection);
     connect(WbSimulationState::instance(), &WbSimulationState::physicsStepStarted, this,
@@ -2837,18 +2860,20 @@ void WbSolid::collectHiddenKinematicParameters(HiddenKinematicParametersMap &map
 
       // TODO: implement an mIsVisible flag in WbNode for sake of efficiency
       const WbJointParameters *const p = j->parameters();
-      if ((p == NULL || !WbNodeUtilities::isVisible(p->findField("position"))) && j->position() != j->initialPosition())
+      if ((p == NULL || !WbVrmlNodeUtilities::isVisible(p->findField("position"))) && j->position() != j->initialPosition())
         v[0] = j->position();
 
       if (j->nodeType() == WB_NODE_HINGE_2_JOINT || j->nodeType() == WB_NODE_BALL_JOINT) {
         const WbJointParameters *const p2 = j->parameters2();
-        if ((p2 == NULL || !WbNodeUtilities::isVisible(p2->findField("position"))) && j->position(2) != j->initialPosition(2))
+        if ((p2 == NULL || !WbVrmlNodeUtilities::isVisible(p2->findField("position"))) &&
+            j->position(2) != j->initialPosition(2))
           v[1] = j->position(2);
       }
 
       if (j->nodeType() == WB_NODE_BALL_JOINT) {
         const WbJointParameters *const p3 = j->parameters3();
-        if ((p3 == NULL || !WbNodeUtilities::isVisible(p3->findField("position"))) && j->position(3) != j->initialPosition(3))
+        if ((p3 == NULL || !WbVrmlNodeUtilities::isVisible(p3->findField("position"))) &&
+            j->position(3) != j->initialPosition(3))
           v[2] = j->position(3);
       }
 
@@ -2912,8 +2937,8 @@ void WbSolid::enable(bool enabled, bool ode) {
   }
 }
 
-void WbSolid::exportURDFShape(WbVrmlWriter &writer, const QString &geometry, const WbTransform *transform,
-                              bool correctOrientation, const WbVector3 &offset) const {
+void WbSolid::exportUrdfShape(WbWriter &writer, const QString &geometry, const WbTransform *transform,
+                              const WbVector3 &offset) const {
   const QStringList element = QStringList() << "visual"
                                             << "collision";
   for (int j = 0; j < element.size(); ++j) {
@@ -2921,17 +2946,11 @@ void WbSolid::exportURDFShape(WbVrmlWriter &writer, const QString &geometry, con
     writer.indent();
     writer << QString("<%1>\n").arg(element[j]);
     writer.increaseIndent();
-    if (transform != this || correctOrientation || !offset.isNull()) {
+    if (transform != this || !offset.isNull()) {
       WbVector3 translation = transform->translation() + offset;
       WbRotation rotation = transform->rotation();
       writer.indent();
-      if (correctOrientation) {
-        if (transform == this) {
-          translation = offset;
-          rotation = WbRotation(1.0, 0.0, 0.0, 1.5707963);
-        } else
-          rotation = WbRotation(rotation.toMatrix3() * WbRotation(1.0, 0.0, 0.0, 1.5707963).toMatrix3());
-      } else if (transform == this) {
+      if (transform == this) {
         rotation = WbRotation(0.0, 1.0, 0.0, 0.0);
         translation = offset;
       }
@@ -2954,7 +2973,7 @@ void WbSolid::exportURDFShape(WbVrmlWriter &writer, const QString &geometry, con
   }
 }
 
-bool WbSolid::exportNodeHeader(WbVrmlWriter &writer) const {
+bool WbSolid::exportNodeHeader(WbWriter &writer) const {
   if (writer.isUrdf()) {
     const bool ret = WbMatter::exportNodeHeader(writer);
     if (!ret) {
@@ -2968,18 +2987,18 @@ bool WbSolid::exportNodeHeader(WbVrmlWriter &writer) const {
           const WbCapsule *capsule = dynamic_cast<const WbCapsule *>(node);
           if (box || cylinder || sphere || capsule) {
             const WbTransform *transform = WbNodeUtilities::findUpperTransform(node);
-            QList<QPair<QString, WbVector3>> geometries;  // string of the geometry and its offset
+            QList<std::pair<QString, WbVector3>> geometries;  // string of the geometry and its offset
 
             if (box) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<box size=\"%1 %2 %3\"/>\n").arg(box->size().x()).arg(box->size().y()).arg(box->size().z());
               geometries << pair;
             } else if (cylinder) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<cylinder radius=\"%1\" length=\"%2\"/>\n").arg(cylinder->radius()).arg(cylinder->height());
               geometries << pair;
             } else if (capsule) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<cylinder radius=\"%1\" length=\"%2\"/>\n").arg(capsule->radius()).arg(capsule->height());
               geometries << pair;
               pair.first = QString("<sphere radius=\"%1\"/>\n").arg(capsule->radius());
@@ -2993,14 +3012,13 @@ bool WbSolid::exportNodeHeader(WbVrmlWriter &writer) const {
                 pair.second = transform->rotation().toMatrix3() * pair.second;
               geometries << pair;
             } else if (sphere) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<sphere radius=\"%1\"/>\n").arg(sphere->radius());
               geometries << pair;
             } else
               assert(false);
             for (int j = 0; j < geometries.size(); ++j)
-              exportURDFShape(writer, geometries[j].first, transform, cylinder || capsule,
-                              geometries[j].second + writer.jointOffset());
+              exportUrdfShape(writer, geometries[j].first, transform, geometries[j].second + writer.jointOffset());
           }
         }
       }
@@ -3011,29 +3029,18 @@ bool WbSolid::exportNodeHeader(WbVrmlWriter &writer) const {
   return WbMatter::exportNodeHeader(writer);
 }
 
-void WbSolid::exportNodeFields(WbVrmlWriter &writer) const {
+void WbSolid::exportNodeFields(WbWriter &writer) const {
   WbMatter::exportNodeFields(writer);
   if (writer.isX3d()) {
     if (!name().isEmpty())
       writer << " name='" << sanitizedName() << "'";
-    writer << " solid='true'";
+    writer << " type='solid'";
   }
 }
 
-void WbSolid::exportNodeFooter(WbVrmlWriter &writer) const {
-  if (writer.isX3d() && boundingObject()) {
-    writer << "<Switch whichChoice='-1' class='selector'>";
-    const WbGeometry *geom = dynamic_cast<const WbGeometry *>(boundingObject());
-    if (geom)
-      writer << "<Shape>";
-
+void WbSolid::exportNodeFooter(WbWriter &writer) const {
+  if (writer.isX3d() && boundingObject())
     boundingObject()->exportBoundingObjectToX3D(writer);
-
-    if (geom)
-      writer << "</Shape>";
-
-    writer << "</Switch>";
-  }
 
   WbMatter::exportNodeFooter(writer);
 }

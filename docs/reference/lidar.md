@@ -4,26 +4,32 @@ Derived from [Device](device.md) and [Solid](solid.md).
 
 ```
 Lidar {
-  SFFloat  tiltAngle            0.0       # [-pi/2, pi/2]
-  SFInt32  horizontalResolution 512       # [0, inf)
-  SFFloat  fieldOfView          1.5708    # [0, 2*pi]
-  SFFloat  verticalFieldOfView  0.2       # [0, pi]
-  SFInt32  numberOfLayers       4         # [0, inf)
-  SFFloat  near                 0.01      # [0, inf)
-  SFFloat  minRange             0.01      # [near, inf)
-  SFFloat  maxRange             1.0       # [minRange, inf)
-  SFString type                 "fixed"   # {"fixed", "rotating"}
-  SFBool   spherical            TRUE      # {TRUE, FALSE}
-  SFFloat  noise                0.0       # [0, inf)
-  SFFloat  resolution           -1.0      # {-1, [0, inf)}
-  SFFloat  defaultFrequency     10        # [minFrequency, maxFrequency]
-  SFFloat  minFrequency         1         # [0, maxFrequency)
-  SFFloat  maxFrequency         25        # [minFrequency, inf)
-  SFNode   rotatingHead         NULL      # {Solid (or derived), PROTO}
+  SFFloat  tiltAngle            0.0           # [-pi/2, pi/2]
+  SFInt32  horizontalResolution 512           # [0, inf)
+  SFFloat  fieldOfView          1.5708        # [0, 2*pi]
+  SFFloat  verticalFieldOfView  0.2           # [0, pi]
+  SFInt32  numberOfLayers       4             # [0, inf)
+  SFFloat  near                 0.01          # [0, inf)
+  SFFloat  minRange             0.01          # [near, inf)
+  SFFloat  maxRange             1.0           # [minRange, inf)
+  SFString type                 "fixed"       # {"fixed", "rotating"}
+  SFString projection           "cylindrical" # {"planar", "cylindrical"}
+  SFFloat  noise                0.0           # [0, inf)
+  SFFloat  resolution           -1.0          # {-1, [0, inf)}
+  SFFloat  defaultFrequency     10            # [minFrequency, maxFrequency]
+  SFFloat  minFrequency         1             # [0, maxFrequency)
+  SFFloat  maxFrequency         25            # [minFrequency, inf)
+  SFNode   rotatingHead         NULL          # {Solid (or derived), PROTO}
 }
 ```
 
 ### Description
+
+%figure "Lidar Image"
+
+![lidar.png](images/lidar.thumbnail.jpg)
+
+%end
 
 The [Lidar](#lidar) node is used to model a robot's on-board lidar (laser-scanner).
 
@@ -138,7 +144,7 @@ With lidar devices, all the points are not acquired at the exact same time but r
 - The `horizontalResolution` field defines the number of points returned by layers.
 
 - The `fieldOfView` field defines the horizontal field of view angle of the lidar.
-The value is limited to the range 0 to &pi; radians if the `spherical` field is set to FALSE, otherwise there is no upper limit.
+The value is limited to the range 0 to &pi; radians if the `projection` field is set to "planar", otherwise there is no upper limit.
 
 - The `verticalFieldOfView` field defines the vertical repartition of the layers (angle between first and last layer).
 
@@ -161,9 +167,10 @@ If the range value is bigger than the `maxRange` value then infinity is returned
 
 - The `type` field should either be 'fixed' or 'rotating', it defines if the lidar has a rotating or fixed head.
 
-- The `spherical` field switches between a planar or a spherical projection.
-It is highly recommended to use the spherical projection in case of fixed-head lidar.
-More information on spherical projections is provided in the [spherical projection](camera.md#spherical-projection) section of the [Camera](camera.md) node.
+- `projection`: switch between a planar or a cylindrical projection.
+It is highly recommended to use the cylindrical projection in case of fixed-head lidar.
+More information on cylindrical projections is provided in the [projections](camera.md#spherical-and-cylindrical-projections) section of the [Camera](camera.md) node.
+The "spherical" projection is not available for a lidar device.
 
 - If the `noise` field is greater than 0.0, a gaussian noise is added to each depth value of a lidar image.
 A value of 0.0 corresponds to no noise and thus saves computation time.
@@ -585,7 +592,7 @@ number_of_points = wb_lidar_get_number_of_points(tag)
 | name | service/topic | data type | data type definition |
 | --- | --- | --- | --- |
 | `/<device_name>/point_cloud` | `topic` | [`sensor_msgs::PointCloud`](http://docs.ros.org/api/sensor_msgs/html/msg/PointCloud.html) | [`Header`](http://docs.ros.org/api/std_msgs/html/msg/Header.html) `header`<br/>[`geometry_msgs/Point32[]`](http://docs.ros.org/api/geometry_msgs/html/msg/Point32.html) `points`<br/>[`sensor_msgs/ChannelFloat32[]`](http://docs.ros.org/api/sensor_msgs/html/msg/ChannelFloat32.html) `channels`<br/>Note: the first channel is filled with the corresponding layer id. |
-| `/<device_name>/laser_scan/layer<X>` | `topic` | [`sensor_msgs::LaserScan`](http://docs.ros.org/api/sensor_msgs/html/msg/LaserScan.html) | [`Header`](http://docs.ros.org/api/std_msgs/html/msg/Header.html) `header`<br/>`float32 angle_min`<br/>`float32 angle_max`<br/>`float32 angle_increment`<br/>`float32 time_increment`<br/>`float32 scan_time`<br/>`float32 range_min`<br/>`float32 range_max`<br/>`float32[] ranges`<br/>`float32[] intensities` |
+| `/<device_name>/laser_scan (only present if the lidar has exactly one layer)` | `topic` | [`sensor_msgs::LaserScan`](http://docs.ros.org/api/sensor_msgs/html/msg/LaserScan.html) | [`Header`](http://docs.ros.org/api/std_msgs/html/msg/Header.html) `header`<br/>`float32 angle_min`<br/>`float32 angle_max`<br/>`float32 angle_increment`<br/>`float32 time_increment`<br/>`float32 scan_time`<br/>`float32 range_min`<br/>`float32 range_max`<br/>`float32[] ranges`<br/>`float32[] intensities` |
 | `/<device_name>/get_layer_point_cloud` | `service` | `webots_ros::lidar_get_layer_point_cloud` | `int32 layer`<br/>`---`<br/>[`sensor_msgs::PointCloud`](http://docs.ros.org/api/sensor_msgs/html/msg/PointCloud.html) pointCloud |
 
 %tab-end
@@ -891,7 +898,7 @@ The `wb_lidar_get_min_frequency` and `wb_lidar_get_max_frequency` functions retu
 #include <webots/lidar.h>
 
 double wb_lidar_get_fov(WbDeviceTag tag);
-int wb_lidar_get_vertical_fov(WbDeviceTag tag);
+double wb_lidar_get_vertical_fov(WbDeviceTag tag);
 ```
 
 %tab-end

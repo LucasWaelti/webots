@@ -1,5 +1,5 @@
 /*
- * Copyright 1996-2021 Cyberbotics Ltd.
+ * Copyright 1996-2023 Cyberbotics Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,8 +30,8 @@
 #include <webots/range_finder.h>
 #include <webots/robot.h>
 
-#define WHEEL_RADIUS 0.075
-#define SPEED_MAX 1.4
+#define WHEEL_RADIUS 0.0625
+#define SPEED_MAX 0.95
 #define SPEED_MIN -0.3
 #define ANGULAR_SPEED_MAX 0.3
 #define ANGULAR_SPEED_MIN -0.3
